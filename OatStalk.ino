@@ -1,11 +1,9 @@
-// Include the ESP8266 WiFi library. (Works a lot like the
-// Arduino WiFi library.)
-#include <ESP8266WiFi.h>
-// Include the SparkFun Phant library.
-#include <Phant.h>
+
 #include <Wire.h>
 #include <SPI.h>
 #include <SparkFunLSM9DS1.h>
+#include <ESP8266WiFi.h>
+#include <Phant.h>
 
 //////////////////////////
 // LSM9DS1 Library Init //
@@ -18,65 +16,78 @@ LSM9DS1 imu;
 // Example I2C Setup //
 ///////////////////////
 // SDO_XM and SDO_G are both pulled high, so our addresses are:
-#define LSM9DS1_M  0x1E // Would be 0x1C if SDO_M is LOW
-#define LSM9DS1_AG  0x6B // Would be 0x6A if SDO_AG is LOW
+#define LSM9DS1_M	0x1E // Would be 0x1C if SDO_M is LOW
+#define LSM9DS1_AG	0x6B // Would be 0x6A if SDO_AG is LOW
 
-//////////////////////
-// WiFi Definitions //
-//////////////////////
-const char WiFiSSID[] = "WiFi_Network";
-const char WiFiPSK[] = "WiFi_Password";
+const char WiFiSSID[] = "galileo";
+const char WiFiPSK[] = "yesyesyes";
 
 ////////////////
 // Phant Keys //
 ////////////////
 const char PhantHost[] = "data.sparkfun.com";
-const char PublicKey[] = "wpvZ9pE1qbFJAjaGd3bn";
-const char PrivateKey[] = "wzeB1z0xWNt1YJX27xdg";
-
-/////////////////
-// Post Timing //
-/////////////////
-const unsigned long postRate = 30000;
-unsigned long lastPost = 0;
-static unsigned long lastPrint = 0; // Keep track of print time
+const char PublicKey[] = "jwDXnoXRGXU2ZY0YNw4j";
+const char PrivateKey[] = "zpAMRKMXqMh8Bxpxv05R";
 
 void setup() 
 {
-  Serial.begin(9600);
+  Serial.begin(115200);
   connectWiFi();
-  digitalWrite(LED_PIN, HIGH);
   // Before initializing the IMU, there are a few settings
   // we may need to adjust. Use the settings struct to set
   // the device's communication mode and addresses:
   imu.settings.device.commInterface = IMU_MODE_I2C;
   imu.settings.device.mAddress = LSM9DS1_M;
   imu.settings.device.agAddress = LSM9DS1_AG;
-  // The above lines will only take effect AFTER calling
-  // imu.begin(), which verifies communication with the IMU
-  // and turns it on.
-  if (!imu.begin())
-  {
-    Serial.println("Failed to communicate with LSM9DS1.");
-    Serial.println("Double-check wiring.");
-    Serial.println("Default settings in this sketch will " \
-                  "work for an out of the box LSM9DS1 " \
-                  "Breakout, but may need to be modified " \
-                  "if the board jumpers are.");
-    while (1)
-      ;
-  }
+  imu.begin();
 }
 
-void loop() 
+void loop()
 {
-  if (lastPost + postRate <= millis())
+  // Update the sensor values whenever new data is available
+  if ( imu.gyroAvailable() )
   {
-    if (postToPhant())
-      lastPost = millis();
-    else
-      delay(100);    
+    // To read from the gyroscope,  first call the
+    // readGyro() function. When it exits, it'll update the
+    // gx, gy, and gz variables with the most current data.
+    imu.readGyro();
   }
+  if ( imu.accelAvailable() )
+  {
+    // To read from the accelerometer, first call the
+    // readAccel() function. When it exits, it'll update the
+    // ax, ay, and az variables with the most current data.
+    imu.readAccel();
+  }
+  if ( imu.magAvailable() )
+  {
+    // To read from the magnetometer, first call the
+    // readMag() function. When it exits, it'll update the
+    // mx, my, and mz variables with the most current data.
+    imu.readMag();
+  } 
+  Serial.print(millis());
+  Serial.print(",");
+  Serial.print(imu.calcGyro(imu.gx), 2);
+  Serial.print(",");
+  Serial.print(imu.calcGyro(imu.gy), 2);
+  Serial.print(",");
+  Serial.print(imu.calcGyro(imu.gz), 2);
+  Serial.print(",");
+  Serial.print(imu.calcAccel(imu.ax), 2);
+  Serial.print(",");
+  Serial.print(imu.calcAccel(imu.ay), 2);
+  Serial.print(",");
+  Serial.print(imu.calcAccel(imu.az), 2);
+  Serial.print(",");
+  Serial.print(imu.calcMag(imu.mx), 2);
+  Serial.print(",");
+  Serial.print(imu.calcMag(imu.my), 2);
+  Serial.print(",");
+  Serial.print(imu.calcMag(imu.mz), 2);
+  Serial.println();
+  postToPhant();
+  delay(10000);
 }
 
 void connectWiFi()
@@ -95,10 +106,6 @@ void connectWiFi()
   // is connected to a WiFi network.
   while (WiFi.status() != WL_CONNECTED)
   {
-    // Blink the LED
-    digitalWrite(LED_PIN, ledStatus); // Write LED high/low
-    ledStatus = (ledStatus == HIGH) ? LOW : HIGH;
-
     // Delays allow the ESP8266 to perform critical tasks
     // defined outside of the sketch. These tasks include
     // setting up, and maintaining, a WiFi connection.
@@ -107,24 +114,11 @@ void connectWiFi()
     // Add delays -- allowing the processor to perform other
     // tasks -- wherever possible.
   }
-}
-
-void initHardware()
-{
-  Serial.begin(9600);
-  pinMode(DIGITAL_PIN, INPUT_PULLUP);
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, LOW);
-  // Don't need to set ANALOG_PIN as input, 
-  // that's all it can be.
+  Serial.println(WiFi.status());
 }
 
 int postToPhant()
 {
-  // LED turns on when we enter, it'll go off when we 
-  // successfully post.
-  digitalWrite(LED_PIN, HIGH);
-
   // Declare an object from the Phant library - phant
   Phant phant(PhantHost, PublicKey, PrivateKey);
 
@@ -138,9 +132,16 @@ int postToPhant()
   String postedID = "Thing-" + macID;
 
   // Add the four field/value pairs defined by our stream:
-  phant.add("id", postedID);
-  phant.add("analog", analogRead(ANALOG_PIN));
-  phant.add("digital", digitalRead(DIGITAL_PIN));
+ // phant.add("id", postedID);
+  phant.add("gx", imu.calcGyro(imu.gx));
+  phant.add("gy", imu.calcGyro(imu.gy));
+  phant.add("gz", imu.calcGyro(imu.gz));
+  phant.add("ax", imu.calcAccel(imu.ax));
+  phant.add("ay", imu.calcAccel(imu.ay));
+  phant.add("az", imu.calcAccel(imu.az));
+  phant.add("mx", imu.calcMag(imu.mx));
+  phant.add("my", imu.calcMag(imu.my));
+  phant.add("mz", imu.calcMag(imu.mz));
   phant.add("time", millis());
 
   // Now connect to data.sparkfun.com, and post our data:
@@ -157,11 +158,7 @@ int postToPhant()
   // Read all the lines of the reply from server and print them to Serial
   while(client.available()){
     String line = client.readStringUntil('\r');
-    //Serial.print(line); // Trying to avoid using serial
+    Serial.print(line); // Trying to avoid using serial
   }
-
-  // Before we exit, turn the LED off.
-  digitalWrite(LED_PIN, LOW);
-
   return 1; // Return success
 }
